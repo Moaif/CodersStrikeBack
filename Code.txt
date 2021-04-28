@@ -12,7 +12,9 @@ using namespace std;
 
 int main()
 {
-
+    int maxDistanceCheck = 0;
+    int checkpointsPassed = 0;
+    bool isBoostAlreadyUsed = false;
     // game loop
     while (1) {
         int x;
@@ -21,26 +23,43 @@ int main()
         int nextCheckpointY; // y position of the next check point
         int nextCheckpointDist; // distance to the next checkpoint
         int nextCheckpointAngle; // angle between your pod orientation and the direction of the next checkpoint
+        int lastCheckpointX = nextCheckpointX;
+        int lastcheckpointY = nextCheckpointY;
         cin >> x >> y >> nextCheckpointX >> nextCheckpointY >> nextCheckpointDist >> nextCheckpointAngle; cin.ignore();
+        if(lastcheckpointY != nextCheckpointY || lastCheckpointX != nextCheckpointX){
+            ++checkpointsPassed;
+        }
         int opponentX;
         int opponentY;
         cin >> opponentX >> opponentY; cin.ignore();
 
         // Write an action using cout. DON'T FORGET THE "<< endl"
         // To debug: cerr << "Debug messages..." << endl;
+        cerr << isBoostAlreadyUsed << " " << checkpointsPassed << " " << maxDistanceCheck << endl;
 
-
-        int thrust = 0;
+        string thrust = " 0";
         if(abs(nextCheckpointAngle) > 90){
-            thrust = 0;
+            thrust = " 0";
         }else{
-            thrust = 100;
+            thrust = " 100";
         }
 
+
+        //Use distance and angle as boost trigger
+        if(checkpointsPassed > 3){
+            if(!isBoostAlreadyUsed && nextCheckpointDist >= (maxDistanceCheck - maxDistanceCheck * 0.1) && abs(nextCheckpointAngle) < 25){
+                thrust = " BOOST";
+                isBoostAlreadyUsed = true;
+            }
+        }else{
+            if(maxDistanceCheck < nextCheckpointDist){
+                maxDistanceCheck = nextCheckpointDist;
+            }
+        }
 
         // You have to output the target position
         // followed by the power (0 <= thrust <= 100)
         // i.e.: "x y thrust"
-        cout << nextCheckpointX << " " << nextCheckpointY << " " << thrust << endl;
+        cout << nextCheckpointX << " " << nextCheckpointY << thrust << endl;
     }
 }
