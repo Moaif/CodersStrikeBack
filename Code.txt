@@ -238,33 +238,12 @@ int main()
         int speedX = firstRound? 0 : x - oldX;
         int speedY = firstRound? 0 : y - oldY;
 
-        cerr << "speed" << speedX << " " << speedY << endl;
-
-        cerr << "next X" << nextCheckpointX << " " << x << " next y " << nextCheckpointY << " " <<y << endl;
-        Vector<float> desiredSpeed = Vector<float>(nextCheckpointX - x,nextCheckpointY -y);
-        cerr << "derired x" << desiredSpeed.x << " desired y " << desiredSpeed.y << endl;
-        desiredSpeed = desiredSpeed.normalize();
-        cerr << "deriredN x" << desiredSpeed.x << " desiredN y " << desiredSpeed.y << endl;
-        desiredSpeed *= clamp(nextCheckpointDist/checkpointRadius, 0, 1) * maxSpeed;
-        cerr << "derired x" << desiredSpeed.x << " desired y " << desiredSpeed.y << endl;
-        Vector<float> currentSpeed = Vector<float>(speedX, speedY);
-
-        //Get thurst value
-        Vector<float> steerSpeed = desiredSpeed - currentSpeed;
-        float value = steerSpeed.getLength() ;
-        cerr << "value" << value << endl;
-        float accelerationPerc = clamp(value/ maxSpeed, 0.0f,1.0f)  * 100;
-        cerr << "acc" << accelerationPerc << endl;
-
-        cerr << "steer x" << steerSpeed.x << " steer y " << steerSpeed.y << endl;
-        //Get target position to rotate correctly
-        steerSpeed = steerSpeed.normalize();
-        nextCheckpointX = x + steerSpeed.x * maxSpeed;
-        nextCheckpointY = y + steerSpeed.y * maxSpeed;
-
         int thrust = 100;
         thrust *= clamp(1-abs(nextCheckpointAngle)/90.0f, 0.0f, 1.0f);
         thrust *= clamp(nextCheckpointDist/(2.0f*checkpointRadius), 0.0f, 1.0f);
+
+        nextCheckpointX -= 3 * speedX;
+        nextCheckpointY -= 3 * speedY;
 
         cerr << "thrust" << thrust << endl;
         // You have to output the target position
