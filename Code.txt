@@ -156,14 +156,14 @@ class CheckPointManager{
         if(lapsElapsed > 0){
             //Manage laps and checkpoint index
             if(checkpointList[currentCheckPointIndex] != vec){
-                if(++currentCheckPointIndex >= checkpointList.size()-1){
+                if(++currentCheckPointIndex >= checkpointList.size()){
                     ++lapsElapsed;
                     currentCheckPointIndex = 0;
                 }
             }
         }else{
             //If we have stored all checkpoints, we are fine to iterate
-            if(!checkpointList.empty() && checkpointList[0] == vec){
+            if(checkpointList.size() > 1 && checkpointList[0] == vec){
                 ++lapsElapsed;
             }else if (checkpointList.empty() || checkpointList.back() != vec){
                 checkpointList.push_back(vec);
@@ -198,7 +198,7 @@ class CheckPointManager{
     int lapsElapsed = 0;
     int furthestDistance = 0;
     int currentCheckPointIndex = 0;
-    const float distanceErrorAllowed = 0.25;
+    const float distanceErrorAllowed = 0.15;
 };
 
 int main()
@@ -228,7 +228,7 @@ int main()
         checkpointManager.SetNextCheckPoint(nextCheckpointX, nextCheckpointY, nextCheckpointDist);
         
         //Check for boost
-        if(checkpointManager.ShouldUseBoost(nextCheckpointDist) && abs(nextCheckpointAngle) < 30){
+        if(checkpointManager.ShouldUseBoost(nextCheckpointDist) && abs(nextCheckpointAngle) < 10){
             cout << nextCheckpointX << " " << nextCheckpointY << " BOOST" << endl;
             checkpointManager.ConsumeBoost();
             continue;
@@ -256,20 +256,21 @@ int main()
         float accelerationPerc = clamp(value/ maxSpeed, 0.0f,1.0f)  * 100;
         cerr << "acc" << accelerationPerc << endl;
 
-        int thrust = static_cast<int>(accelerationPerc);
-
         cerr << "steer x" << steerSpeed.x << " steer y " << steerSpeed.y << endl;
         //Get target position to rotate correctly
         steerSpeed = steerSpeed.normalize();
-        int targetX = x + steerSpeed.x * maxSpeed;
-        int targetY = y + steerSpeed.y * maxSpeed;
+        nextCheckpointX = x + steerSpeed.x * maxSpeed;
+        nextCheckpointY = y + steerSpeed.y * maxSpeed;
+
+        int thrust = 100;
+        thrust *= clamp(1-abs(nextCheckpointAngle)/90.0f, 0.0f, 1.0f);
+        thrust *= clamp(nextCheckpointDist/(2.0f*checkpointRadius), 0.0f, 1.0f);
 
         cerr << "thrust" << thrust << endl;
-
         // You have to output the target position
         // followed by the power (0 <= thrust <= 100)
         // i.e.: "x y thrust"
-        cout << targetX << " " << targetY << " " << thrust << endl;
+        cout << nextCheckpointX << " " << nextCheckpointY << " " << thrust << endl;
         firstRound = false;
     }
 }
