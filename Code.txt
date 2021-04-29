@@ -2,19 +2,213 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
+
+#define PI 3.14159265
 
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
  **/
+template<class TYPE>
+class Vector{
+    public:
+
+    TYPE x = 0;
+    TYPE y = 0;
+
+    Vector() {}
+    Vector(TYPE x, TYPE y): x(x), y(y){}
+
+    Vector operator -(const Vector &v) const
+	{
+		Vector r;
+
+		r.x = x - v.x;
+		r.y = y - v.y;
+
+		return(r);
+	}
+
+	Vector operator-() const
+	{
+		return Vector(-x, -y);
+	}
+
+	Vector operator + (const Vector &v) const
+	{
+		Vector r;
+
+		r.x = x + v.x;
+		r.y = y + v.y;
+
+		return(r);
+	}
+
+    Vector operator /(const TYPE& value)
+	{
+		Vector temp;
+		temp.x = x/value;
+		temp.y = y/value;
+		return temp;
+	}
+
+	Vector operator *(const TYPE& value)
+	{
+		Vector temp;
+		temp.x = x * value;
+		temp.y = y * value;
+		return temp;
+	}
+
+	const Vector& operator -=(const Vector &v)
+	{
+		x -= v.x;
+		y -= v.y;
+
+		return(*this);
+	}
+
+	const Vector& operator +=(const Vector &v)
+	{
+		x += v.x;
+		y += v.y;
+
+		return(*this);
+	}
+
+    const Vector& operator *=(const TYPE value)
+    {
+        x *= value;
+        y *= value;
+
+        return (*this);
+    }
+
+    const Vector& operator /=(const TYPE value)
+    {
+        x /= value;
+        y /= value;
+
+        return (*this);
+    }
+
+	bool operator ==(const Vector& v) const
+	{
+		return (x == v.x && y == v.y);
+	}
+
+	bool operator !=(const Vector& v) const
+	{
+		return (x != v.x || y != v.y);
+	}
+
+	Vector& operator =(const Vector& v)
+	{
+		
+		x = v.x;
+		y = v.y;
+		return (*this);
+	}
+
+	Vector& operator =(const Vector* v)
+	{
+		x = v->x;
+		y = v->y;
+		return (*this);
+	}
+
+    //Utilities
+
+    inline float getLength() const
+	{
+		return sqrtf(x * x + y * y);
+	}
+
+    inline Vector normalize()
+	{
+		float length = getLength();
+        cerr << "lenght" << length << endl;
+		if(length == 0.f) return Vector(1.f, 0);
+        cerr << "reach" << endl;
+		return *this / getLength();
+	}
+
+    	inline Vector rotate(float angle) const
+	{
+        float radian = angle * PI / 180;
+		float cos = cosf(angle);
+		float sin = sinf(angle);
+		return Vector(x*cos - y * sin, x*sin + y * cos);
+	}
+};
+
+class CheckPointManager{
+
+    public:
+
+    void SetNextCheckPoint(int x, int y, int distance){
+
+        const Vector<int> vec = Vector(x,y);
+
+        if(lapsElapsed > 0){
+            //Manage laps and checkpoint index
+            if(checkpointList[currentCheckPointIndex] != vec){
+                if(++currentCheckPointIndex >= checkpointList.size()-1){
+                    ++lapsElapsed;
+                    currentCheckPointIndex = 0;
+                }
+            }
+        }else{
+            //If we have stored all checkpoints, we are fine to iterate
+            if(!checkpointList.empty() && checkpointList[0] == vec){
+                ++lapsElapsed;
+            }else if (checkpointList.empty() || checkpointList.back() != vec){
+                checkpointList.push_back(vec);
+                //Update distance max
+                if(furthestDistance < distance){
+                    furthestDistance = distance;
+                }
+            }
+        }
+    }
+
+    bool ShouldUseBoost(int distance){
+        if(!boostAvailable)
+            return false;
+
+        if(lapsElapsed <= 0)
+            return false;
+
+        if(distance < furthestDistance - furthestDistance * distanceErrorAllowed)
+            return false;
+        
+        return true;
+    }
+
+    void ConsumeBoost(){
+        boostAvailable = false;
+    }
+
+    private:
+    vector<Vector<int>> checkpointList;
+    bool boostAvailable = true;
+    int lapsElapsed = 0;
+    int furthestDistance = 0;
+    int currentCheckPointIndex = 0;
+    const float distanceErrorAllowed = 0.25;
+};
 
 int main()
 {
-    int maxDistanceCheck = 0;
-    int checkpointsPassed = 0;
-    bool isBoostAlreadyUsed = false;
+    CheckPointManager checkpointManager;
+    const int checkpointRadius = 600;
+    const int maxSpeed = 700;//After some test, i guessed this was the max speed
+
+
+    bool firstRound = true;
     // game loop
     while (1) {
         int x;
@@ -23,43 +217,59 @@ int main()
         int nextCheckpointY; // y position of the next check point
         int nextCheckpointDist; // distance to the next checkpoint
         int nextCheckpointAngle; // angle between your pod orientation and the direction of the next checkpoint
-        int lastCheckpointX = nextCheckpointX;
-        int lastcheckpointY = nextCheckpointY;
+        int oldX = x;
+        int oldY = y;
         cin >> x >> y >> nextCheckpointX >> nextCheckpointY >> nextCheckpointDist >> nextCheckpointAngle; cin.ignore();
-        if(lastcheckpointY != nextCheckpointY || lastCheckpointX != nextCheckpointX){
-            ++checkpointsPassed;
-        }
+
         int opponentX;
         int opponentY;
         cin >> opponentX >> opponentY; cin.ignore();
 
-        // Write an action using cout. DON'T FORGET THE "<< endl"
-        // To debug: cerr << "Debug messages..." << endl;
-        cerr << isBoostAlreadyUsed << " " << checkpointsPassed << " " << maxDistanceCheck << endl;
-
-        string thrust = " 0";
-        if(abs(nextCheckpointAngle) > 90){
-            thrust = " 0";
-        }else{
-            thrust = " 100";
+        checkpointManager.SetNextCheckPoint(nextCheckpointX, nextCheckpointY, nextCheckpointDist);
+        
+        //Check for boost
+        if(checkpointManager.ShouldUseBoost(nextCheckpointDist) && abs(nextCheckpointAngle) < 30){
+            cout << nextCheckpointX << " " << nextCheckpointY << " BOOST" << endl;
+            checkpointManager.ConsumeBoost();
+            continue;
         }
 
+        //If no boost is used, then we handle steering
+        int speedX = firstRound? 0 : x - oldX;
+        int speedY = firstRound? 0 : y - oldY;
 
-        //Use distance and angle as boost trigger
-        if(checkpointsPassed > 3){
-            if(!isBoostAlreadyUsed && nextCheckpointDist >= (maxDistanceCheck - maxDistanceCheck * 0.1) && abs(nextCheckpointAngle) < 25){
-                thrust = " BOOST";
-                isBoostAlreadyUsed = true;
-            }
-        }else{
-            if(maxDistanceCheck < nextCheckpointDist){
-                maxDistanceCheck = nextCheckpointDist;
-            }
-        }
+        cerr << "speed" << speedX << " " << speedY << endl;
+
+        cerr << "next X" << nextCheckpointX << " " << x << " next y " << nextCheckpointY << " " <<y << endl;
+        Vector<float> desiredSpeed = Vector<float>(nextCheckpointX - x,nextCheckpointY -y);
+        cerr << "derired x" << desiredSpeed.x << " desired y " << desiredSpeed.y << endl;
+        desiredSpeed = desiredSpeed.normalize();
+        cerr << "deriredN x" << desiredSpeed.x << " desiredN y " << desiredSpeed.y << endl;
+        desiredSpeed *= clamp(nextCheckpointDist/checkpointRadius, 0, 1) * maxSpeed;
+        cerr << "derired x" << desiredSpeed.x << " desired y " << desiredSpeed.y << endl;
+        Vector<float> currentSpeed = Vector<float>(speedX, speedY);
+
+        //Get thurst value
+        Vector<float> steerSpeed = desiredSpeed - currentSpeed;
+        float value = steerSpeed.getLength() ;
+        cerr << "value" << value << endl;
+        float accelerationPerc = clamp(value/ maxSpeed, 0.0f,1.0f)  * 100;
+        cerr << "acc" << accelerationPerc << endl;
+
+        int thrust = static_cast<int>(accelerationPerc);
+
+        cerr << "steer x" << steerSpeed.x << " steer y " << steerSpeed.y << endl;
+        //Get target position to rotate correctly
+        steerSpeed = steerSpeed.normalize();
+        int targetX = x + steerSpeed.x * maxSpeed;
+        int targetY = y + steerSpeed.y * maxSpeed;
+
+        cerr << "thrust" << thrust << endl;
 
         // You have to output the target position
         // followed by the power (0 <= thrust <= 100)
         // i.e.: "x y thrust"
-        cout << nextCheckpointX << " " << nextCheckpointY << thrust << endl;
+        cout << targetX << " " << targetY << " " << thrust << endl;
+        firstRound = false;
     }
 }
