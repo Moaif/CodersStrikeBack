@@ -175,7 +175,7 @@ class CheckPointManager{
         }
     }
 
-    bool ShouldUseBoost(int distance){
+    bool ShouldUseBoost(int distance)const {
         if(!boostAvailable)
             return false;
 
@@ -205,8 +205,6 @@ int main()
 {
     CheckPointManager checkpointManager;
     const int checkpointRadius = 600;
-    const int maxSpeed = 700;//After some test, i guessed this was the max speed
-
 
     bool firstRound = true;
     // game loop
@@ -234,18 +232,24 @@ int main()
             continue;
         }
 
-        //If no boost is used, then we handle steering
+        //If no boost is used
         int speedX = firstRound? 0 : x - oldX;
         int speedY = firstRound? 0 : y - oldY;
 
+        //We calculate thurst
         int thrust = 100;
+        //Based on angle deviation
         thrust *= clamp(1-abs(nextCheckpointAngle)/90.0f, 0.0f, 1.0f);
+        //And distance / checkpoint ratio
         thrust *= clamp(nextCheckpointDist/(2.0f*checkpointRadius), 0.0f, 1.0f);
 
+        //Then we offset target destination to allow better driffting and positioning for next checkpoint
         nextCheckpointX -= 3 * speedX;
         nextCheckpointY -= 3 * speedY;
 
+        //Debug information
         cerr << "thrust" << thrust << endl;
+        
         // You have to output the target position
         // followed by the power (0 <= thrust <= 100)
         // i.e.: "x y thrust"
