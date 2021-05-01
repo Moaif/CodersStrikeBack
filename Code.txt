@@ -2,258 +2,522 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <cmath>
+#include "cmath"
 
 using namespace std;
 
 #define PI 3.14159265
 
+class Point{
+    public:
+    float x;
+    float y;
+
+    Point(float x, float y);
+    float Distance2(const Point& p)const;
+    float Distance(const Point& p)const;
+    Point Closest(const Point& a, const Point& b)const;
+};
+
+class Unit: public Point{
+    public:
+    int id;
+    float r;
+    float vx;
+    float vy;
+
+    Unit(float x, float y,int id, float r, float vx, float vy);
+    class Collision* CheckCollision(Unit& u);
+    virtual void Bounce(Unit& u);
+};
+
+const int CHECKPOINT_RADIUS = 600;
+class Checkpoint: public Unit{
+    public:
+    Checkpoint(float x, float y,int id);
+    virtual void Bounce(Unit& u)override;
+};
+
+const int POD_RADIUS = 400;
+class Pod: public Unit{
+    public:    
+    float angle;
+    int nextCheckpointId;
+    int checkpointsElapsed;
+    int timeout;
+    int turnsSinceLastShield;
+
+    Pod(int id);
+    float GetAngle(const Point& p)const;
+    float DiffAngle(const Point& p)const;
+    void Rotate(const Point& p);
+    void Boost(int thrust);
+    void Move(float t);
+    void EndTurnCalculations();
+    void Play(const Point& p, int thrust);
+    virtual void Bounce(Unit& u) override;
+    void BounceWithCheckpoint(Checkpoint& c);
+    void Output(const class Move& move) const;
+
+    void UpdateValues(float x, float y, float vx, float vy, float angle, int nextCheckPointId);
+};
+
+class Collision{
+    public:
+    Unit& a;
+    Unit& b;
+    float t;
+
+    Collision(Unit& a, Unit& b, float t);
+};
+
+class Move{
+    public:
+    float angle;
+    int thrust;
+
+    Move(float angle, int thrust);
+    void Mutate(float amplitude);
+};
+
+const int MAX_MOVES_SIM = 5;
+class Solution{
+    public:
+    Move* moves1[MAX_MOVES_SIM];
+    Move* moves2[MAX_MOVES_SIM];
+
+    void Mutate(float amplitude);
+};
+
+
+Point::Point(float x, float y): x(x), y(y){}
+
+float Point::Distance2(const Point& p)const{
+    return (x - p.x)*(x - p.x) + (y - p.y)*(y - p.y);
+}
+
+float Point::Distance(const Point& p)const{
+    return sqrt(Distance2(p));
+}
+
+Point Point::Closest(const Point& a, const Point& b)const{
+    float da = b.y - a.y;
+    float db = a.x - b.x;
+    float c1 = da*a.x + db*a.y;
+    float c2 = -db*x + da*y;
+    float det = da*da + db*db;
+    float cx = 0;
+    float cy = 0;
+
+    if (det != 0) {
+        cx = (da*c1 - db*c2) / det;
+        cy = (da*c2 + db*c1) / det;
+    } else {
+        // The point is already on the line
+        cx = x;
+        cy = y;
+    }
+
+    return Point(cx, cy);
+} 
+
+Unit::Unit(float x, float y,int id, float r, float vx, float vy):Point(x, y), id(id), r(r), vx(vx), vy(vy){}
+
+Collision* Unit::CheckCollision(Unit& u){
+    // Square of the distance
+    float dist = Distance2(u);
+
+    // Sum of the radii squared
+    float sr = (r + u.r)*(r + u.r);
+
+    // We take everything squared to avoid calling sqrt uselessly. It is better for performances
+
+    if (dist < sr) {
+        // Objects are already touching each other. We have an immediate collision.
+        return new Collision(*this, u, 0.0);
+    }
+
+    // Optimisation. Objects with the same speed will never collide
+    if (vx == u.vx && vy == u.vy) {
+         return nullptr;
+    }
+
+    // We place ourselves in the reference frame of u. u is therefore stationary and is at (0,0)
+    float x = x - u.x;
+    float y = y - u.y;
+    Point myp = Point(x, y);
+    float vx = vx - u.vx;
+    float vy = vy - u.vy;
+    Point up = Point(0, 0);
+
+    // We look for the closest point to u (which is in (0,0)) on the line described by our speed vector
+    Point p = up.Closest(myp, Point(x + vx, y + vy));
+
+    // Square of the distance between u and the closest point to u on the line described by our speed vector
+    float pdist = up.Distance2(p);
+
+    // Square of the distance between us and that point
+    float mypdist = myp.Distance2(p);
+
+    // If the distance between u and this line is less than the sum of the radii, there might be a collision
+    if (pdist < sr) {
+    // Our speed on the line
+        float length = sqrt(vx*vx + vy*vy);
+
+        // We move along the line to find the point of impact
+        float backdist = sqrt(sr - pdist);
+        p.x = p.x - backdist * (vx / length);
+        p.y = p.y - backdist * (vy / length);
+
+        // If the point is now further away it means we are not going the right way, therefore the collision won't happen
+        if (myp.Distance2(p) > mypdist) {
+            return nullptr;
+        }
+
+        pdist = p.Distance(myp);
+
+        // The point of impact is further than what we can travel in one turn
+        if (pdist > length) {
+            return nullptr;
+        }
+
+        // Time needed to reach the impact point
+        float t = pdist / length;
+
+        return new Collision(*this, u, t);
+    }
+
+    return nullptr;
+}
+
+//Will be overriden on children
+void Unit::Bounce(Unit& u){}
+
+Checkpoint::Checkpoint(float x, float y, int id): Unit(x,y,CHECKPOINT_RADIUS,id,0,0){}
+
+void Checkpoint::Bounce(Unit& u){}
+
+Pod::Pod(int id):Unit(0,0,POD_RADIUS,id,0,0){}
+
+float Pod::GetAngle(const Point& p)const{
+    float d = Distance(p);
+    float dx = (p.x - x) / d;
+    float dy = (p.y - y) / d;
+
+    // Simple trigonometry. We multiply by 180.0 / PI to convert radiants to degrees.
+    float a = acos(dx) * 180.0 / PI;
+
+    // If the point I want is below me, I have to shift the angle for it to be correct
+    if (dy < 0) {
+        a = 360.0 - a;
+    }
+
+    return a;
+}
+
+float Pod::DiffAngle(const Point& p)const{
+    float a = GetAngle(p);
+
+    // To know whether we should turn clockwise or not we look at the two ways and keep the smallest
+    // The ternary operators replace the use of a modulo operator which would be slower
+    float right = angle <= a ? a - angle : 360.0 - angle + a;
+    float left = angle >= a ? angle - a : angle + 360.0 - a;
+
+    if (right < left) {
+        return right;
+    } else {
+        // We return a negative angle if we must rotate to left
+        return -left;
+    }
+}
+
+void Pod::Rotate(const Point& p){
+    float a = DiffAngle(p);
+
+    // Can't turn by more than 18° in one turn
+    if (a > 18.0) {
+        a = 18.0;
+    } else if (a < -18.0) {
+        a = -18.0;
+    }
+
+    angle += a;
+
+    // The % operator is slow. If we can avoid it, it's better.
+    if (angle >= 360.0) {
+        angle = angle - 360.0;
+    } else if (angle < 0.0) {
+        angle += 360.0;
+    }
+}
+
+void Pod::Boost(int thrust){
+    // Don't forget that a pod which has activated its shield cannot accelerate for 3 turns
+    if (turnsSinceLastShield <= 3) {
+        return;
+    }
+
+    // Conversion of the angle to radiants
+    float ra = angle * PI / 180.0;
+
+    // Trigonometry
+    vx += cos(ra) * thrust;
+    vy += sin(ra) * thrust;
+}
+
+void Pod::Move(float t){
+    x += vx * t;
+    y += vy * t;
+}
+
+void Pod::EndTurnCalculations(){
+    x = round(x);
+    y = round(y);
+    vx = static_cast<int>(vx * 0.85);//Truncate
+    vy = static_cast<int>(vy * 0.85);//Truncate
+
+    ++turnsSinceLastShield;
+
+    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
+    timeout -= 1;
+}
+
+void Pod::Play(const Point& p, int thrust){
+    Rotate(p);
+    Boost(thrust);
+    Move(1.0);
+    EndTurnCalculations();
+}
+
+void Pod::Bounce(Unit& u){
+    if (Checkpoint* c = dynamic_cast<Checkpoint*>(&u)) {  
+        // Collision with a checkpoint
+        BounceWithCheckpoint(*c);
+    } else if(Pod* pod = dynamic_cast<Pod*>(&u)) {
+        // If a pod has its shield active its mass is 10 otherwise it's 1
+        float m1 = turnsSinceLastShield == 0 ? 10 : 1;
+        float m2 = pod->turnsSinceLastShield == 0 ? 10 : 1;
+        float mcoeff = (m1 + m2) / (m1 * m2);
+
+        float nx = x - pod->x;
+        float ny = y - pod->y;
+
+        // Square of the distance between the 2 pods. This value could be hardcoded because it is always 800²
+        float nxnysquare = nx*nx + ny*ny;
+
+        float dvx = vx - pod->vx;
+        float dvy = vy - pod->vy;
+
+        // fx and fy are the components of the impact vector. product is just there for optimisation purposes
+        float product = nx*dvx + ny*dvy;
+        float fx = (nx * product) / (nxnysquare * mcoeff);
+        float fy = (ny * product) / (nxnysquare * mcoeff);
+
+        // We apply the impact vector once
+        vx -= fx / m1;
+        vy -= fy / m1;
+        pod->vx += fx / m2;
+        pod->vy += fy / m2;
+
+        // If the norm of the impact vector is less than 120, we normalize it to 120
+        float impulse = sqrt(fx*fx + fy*fy);
+        if (impulse < 120.0) {
+            fx = fx * 120.0 / impulse;
+            fy = fy * 120.0 / impulse;
+        }
+
+        // We apply the impact vector a second time
+        vx -= fx / m1;
+        vy -= fy / m1;
+        pod->vx += fx / m2;
+        pod->vy += fy / m2;
+
+        // This is one of the rare places where a Vector class would have made the code more readable.
+        // But this place is called so often that I can't pay a performance price to make it more readable.
+    }
+}
+
+void Pod::BounceWithCheckpoint(Checkpoint &c){
+    //Handle pod data over next checkpoint
+    ++nextCheckpointId;
+    ++checkpointsElapsed;
+}
+
+void Pod::Output(const class Move& move) const{
+
+}
+
+void Pod::UpdateValues(float x, float y, float vx, float vy, float angle, int nextCheckPointId){
+    this->x = x;
+    this->y = y;
+    this->vx = vx;
+    this->vy = vy;
+    this->angle = angle;
+    this->nextCheckpointId = nextCheckPointId;
+}
+
+
+Collision::Collision(Unit& a, Unit& b, float t): a(a), b(b), t(t){}
+
+Move::Move(float angle, int thrust): angle(angle), thrust(thrust){}
+    
+void Move::Mutate(float amplitude){
+        
+}
+
+void Solution::Mutate(float amplitude){
+
+}
+
+void Play(Pod* pods[], Checkpoint* checkpoints[]) {
+    // This tracks the time during the turn. The goal is to reach 1.0
+    float t = 0.0;
+
+    int podsLenght =sizeof(pods)/sizeof(pods[0]);
+    while (t < 1.0) {
+        Collision* firstCollision = nullptr;
+
+        // We look for all the collisions that are going to occur during the turn
+        for (int i = 0; i < podsLenght; ++i) {
+            // Collision with another pod?
+            for (int j = i + 1; j < podsLenght; ++j) {
+                Collision* col = pods[i]->CheckCollision(*pods[j]);
+
+                // If the collision occurs earlier than the one we currently have we keep it
+                if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
+                    free(firstCollision);
+                    firstCollision = col;
+                }
+            }
+
+            // Collision with another checkpoint?
+            // It is unnecessary to check all checkpoints here. We only test the pod's next checkpoint.
+            // We could look for the collisions of the pod with all the checkpoints, but if such a collision happens it wouldn't impact the game in any way
+            Collision* col = pods[i]->CheckCollision(*checkpoints[pods[i]->nextCheckpointId]);
+
+            // If the collision happens earlier than the current one we keep it
+            if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
+                free(firstCollision);
+                firstCollision = col;
+            }
+        }
+
+        if (firstCollision == nullptr) {
+            // No collision, we can move the pods until the end of the turn
+            for (int i = 0; i < podsLenght; ++i) {
+                pods[i]->Move(1.0 - t);
+            }
+
+            // End of the turn
+            t = 1.0;
+        } else {
+            // Move the pods to reach the time `t` of the collision
+            for (int i = 0; i < podsLenght; ++i) {
+                pods[i]->Move(firstCollision->t);
+            }
+
+            // Play out the collision
+            firstCollision->a.Bounce(firstCollision->b);
+
+            t += firstCollision->t;
+
+            free(firstCollision);
+            firstCollision = nullptr;
+        }
+    }
+
+    for (int i = 0; i < podsLenght; ++i) {
+        pods[i]->EndTurnCalculations();
+    }
+}
+
+void Test(Pod* pods[], Checkpoint* checkpoints[]) {
+
+    int podsLenght =sizeof(pods)/sizeof(pods[0]);
+
+    for (int i = 0; i < podsLenght; ++i) {
+        pods[i]->Rotate(Point(8000, 4500));
+        pods[i]->Boost(100);
+    }
+
+    Play(pods, checkpoints);
+}
+
+
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
  **/
-template<class TYPE>
-class Vector{
-    public:
-
-    TYPE x = 0;
-    TYPE y = 0;
-
-    Vector() {}
-    Vector(TYPE x, TYPE y): x(x), y(y){}
-
-    Vector operator -(const Vector &v) const
-	{
-		Vector r;
-
-		r.x = x - v.x;
-		r.y = y - v.y;
-
-		return(r);
-	}
-
-	Vector operator-() const
-	{
-		return Vector(-x, -y);
-	}
-
-	Vector operator + (const Vector &v) const
-	{
-		Vector r;
-
-		r.x = x + v.x;
-		r.y = y + v.y;
-
-		return(r);
-	}
-
-    Vector operator /(const TYPE& value)
-	{
-		Vector temp;
-		temp.x = x/value;
-		temp.y = y/value;
-		return temp;
-	}
-
-	Vector operator *(const TYPE& value)
-	{
-		Vector temp;
-		temp.x = x * value;
-		temp.y = y * value;
-		return temp;
-	}
-
-	const Vector& operator -=(const Vector &v)
-	{
-		x -= v.x;
-		y -= v.y;
-
-		return(*this);
-	}
-
-	const Vector& operator +=(const Vector &v)
-	{
-		x += v.x;
-		y += v.y;
-
-		return(*this);
-	}
-
-    const Vector& operator *=(const TYPE value)
-    {
-        x *= value;
-        y *= value;
-
-        return (*this);
-    }
-
-    const Vector& operator /=(const TYPE value)
-    {
-        x /= value;
-        y /= value;
-
-        return (*this);
-    }
-
-	bool operator ==(const Vector& v) const
-	{
-		return (x == v.x && y == v.y);
-	}
-
-	bool operator !=(const Vector& v) const
-	{
-		return (x != v.x || y != v.y);
-	}
-
-	Vector& operator =(const Vector& v)
-	{
-		
-		x = v.x;
-		y = v.y;
-		return (*this);
-	}
-
-	Vector& operator =(const Vector* v)
-	{
-		x = v->x;
-		y = v->y;
-		return (*this);
-	}
-
-    //Utilities
-
-    inline float getLength() const
-	{
-		return sqrtf(x * x + y * y);
-	}
-
-    inline Vector normalize()
-	{
-		float length = getLength();
-        cerr << "lenght" << length << endl;
-		if(length == 0.f) return Vector(1.f, 0);
-        cerr << "reach" << endl;
-		return *this / getLength();
-	}
-
-    	inline Vector rotate(float angle) const
-	{
-        float radian = angle * PI / 180;
-		float cos = cosf(angle);
-		float sin = sinf(angle);
-		return Vector(x*cos - y * sin, x*sin + y * cos);
-	}
-};
-
-class CheckPointManager{
-
-    public:
-
-    void SetNextCheckPoint(int x, int y, int distance){
-
-        const Vector<int> vec = Vector(x,y);
-
-        if(lapsElapsed > 0){
-            //Manage laps and checkpoint index
-            if(checkpointList[currentCheckPointIndex] != vec){
-                if(++currentCheckPointIndex >= checkpointList.size()){
-                    ++lapsElapsed;
-                    currentCheckPointIndex = 0;
-                }
-            }
-        }else{
-            //If we have stored all checkpoints, we are fine to iterate
-            if(checkpointList.size() > 1 && checkpointList[0] == vec){
-                ++lapsElapsed;
-            }else if (checkpointList.empty() || checkpointList.back() != vec){
-                checkpointList.push_back(vec);
-                //Update distance max
-                if(furthestDistance < distance){
-                    furthestDistance = distance;
-                }
-            }
-        }
-    }
-
-    bool ShouldUseBoost(int distance)const {
-        if(!boostAvailable)
-            return false;
-
-        if(lapsElapsed <= 0)
-            return false;
-
-        if(distance < furthestDistance - furthestDistance * distanceErrorAllowed)
-            return false;
-        
-        return true;
-    }
-
-    void ConsumeBoost(){
-        boostAvailable = false;
-    }
-
-    private:
-    vector<Vector<int>> checkpointList;
-    bool boostAvailable = true;
-    int lapsElapsed = 0;
-    int furthestDistance = 0;
-    int currentCheckPointIndex = 0;
-    const float distanceErrorAllowed = 0.15;
-};
-
 int main()
 {
-    CheckPointManager checkpointManager;
-    const int checkpointRadius = 600;
+    const int NUM_PODS =2;
 
-    bool firstRound = true;
+    int laps;
+    cin >> laps; cin.ignore();
+
+    int checkpointCount;
+    cin >> checkpointCount; cin.ignore();
+    
+    Checkpoint* checkpoints[checkpointCount];
+    for (int i = 0; i < checkpointCount; i++) {
+        int checkpointX;
+        int checkpointY;
+        cin >> checkpointX >> checkpointY; cin.ignore();
+        checkpoints[i] = new Checkpoint(checkpointX, checkpointY,i);
+    }
+
+    Pod* pods[NUM_PODS];
+    for(int i = 0; i < NUM_PODS*2; ++i){//We init ours and enemy ones
+        pods[i] = new Pod(i);
+    }
+
+    bool test = true;
     // game loop
     while (1) {
-        int x;
-        int y;
-        int nextCheckpointX; // x position of the next check point
-        int nextCheckpointY; // y position of the next check point
-        int nextCheckpointDist; // distance to the next checkpoint
-        int nextCheckpointAngle; // angle between your pod orientation and the direction of the next checkpoint
-        int oldX = x;
-        int oldY = y;
-        cin >> x >> y >> nextCheckpointX >> nextCheckpointY >> nextCheckpointDist >> nextCheckpointAngle; cin.ignore();
 
-        int opponentX;
-        int opponentY;
-        cin >> opponentX >> opponentY; cin.ignore();
-
-        checkpointManager.SetNextCheckPoint(nextCheckpointX, nextCheckpointY, nextCheckpointDist);
-        
-        //Check for boost
-        if(checkpointManager.ShouldUseBoost(nextCheckpointDist) && abs(nextCheckpointAngle) < 10){
-            cout << nextCheckpointX << " " << nextCheckpointY << " BOOST" << endl;
-            checkpointManager.ConsumeBoost();
-            continue;
+        for (int i = 0; i < NUM_PODS; i++) {
+            int x; // x position of your pod
+            int y; // y position of your pod
+            int vx; // x speed of your pod
+            int vy; // y speed of your pod
+            int angle; // angle of your pod
+            int nextCheckPointId; // next check point id of your pod
+            cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; cin.ignore();
+            if(test){
+            pods[i]->UpdateValues(x,y, vx, vy, angle, nextCheckPointId);
+            }
+            cerr << "Real: x " << x << " y " << y << " vx " << vx << " vy " << vy << endl;
         }
 
-        //If no boost is used
-        int speedX = firstRound? 0 : x - oldX;
-        int speedY = firstRound? 0 : y - oldY;
+        for (int i = NUM_PODS; i < NUM_PODS*2; i++) {
+            int x2; // x position of the opponent's pod
+            int y2; // y position of the opponent's pod
+            int vx2; // x speed of the opponent's pod
+            int vy2; // y speed of the opponent's pod
+            int angle2; // angle of the opponent's pod
+            int nextCheckPointId2; // next check point id of the opponent's pod
+            cin >> x2 >> y2 >> vx2 >> vy2 >> angle2 >> nextCheckPointId2; cin.ignore();
 
-        //We calculate thurst
-        int thrust = 100;
-        //Based on angle deviation
-        thrust *= clamp(1-abs(nextCheckpointAngle)/90.0f, 0.0f, 1.0f);
-        //And distance / checkpoint ratio
-        thrust *= clamp(nextCheckpointDist/(2.0f*checkpointRadius), 0.0f, 1.0f);
+            if(test){
+            pods[i]->UpdateValues(x2, y2, vx2, vy2, angle2,  nextCheckPointId2);
+            }
+            cerr << "Real: x " << x2 << " y " << y2 << " vx " << vx2 << " vy " << vy2 << endl;
+        }
 
-        //Then we offset target destination to allow better driffting and positioning for next checkpoint
-        nextCheckpointX -= 3 * speedX;
-        nextCheckpointY -= 3 * speedY;
+        test = false;
 
-        //Debug information
-        cerr << "thrust" << thrust << endl;
+        Test(pods,checkpoints);
         
+        //Display simulated ones
+        for(int i = 0; i < NUM_PODS*2; ++i){
+            Pod* currentPod = pods[i];
+            cerr << "Simulation: x " << currentPod->x << " y " << currentPod->y << " vx " << currentPod->vx << " vy " << currentPod->vy << endl;
+        }
+
         // You have to output the target position
         // followed by the power (0 <= thrust <= 100)
         // i.e.: "x y thrust"
-        cout << nextCheckpointX << " " << nextCheckpointY << " " << thrust << endl;
-        firstRound = false;
+        cout << "8000 "<< "4500" << " 100" << endl;
+        cout << "8000 "<< "4500" << " 100" << endl;
     }
 }
