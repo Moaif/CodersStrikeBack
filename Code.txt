@@ -132,13 +132,10 @@ Collision* Unit::CheckCollision(Unit& u){
     // Square of the distance
     float dist = Distance2(u);
 
-    cerr << "Unit col check " << id << " over Unit " << u.id <<endl;
-
     // Sum of the radii squared
     float sr = (r + u.r)*(r + u.r);
 
     // We take everything squared to avoid calling sqrt uselessly. It is better for performances
-    cerr << " sr " << sr << " dist " << dist << endl;
     if (dist < sr) {
         // Objects are already touching each other. We have an immediate collision.
         return new Collision(*this, u, 0.0);
@@ -156,16 +153,13 @@ Collision* Unit::CheckCollision(Unit& u){
     float relativeVx = vx - u.vx;
     float relativeVy = vy - u.vy;
     Point up = Point(0, 0);
-    cerr << "relative x" << relativeX << " y " << relativeY << " vx " << relativeVx << " vy " << relativeVy <<endl; 
     // We look for the closest point to u (which is in (0,0)) on the line described by our speed vector
     Point p = up.Closest(myp, Point(relativeX + relativeVx, relativeY + relativeVy));
-    cerr << "closest p x " << p.x << " y " << p.y <<endl;
     // Square of the distance between u and the closest point to u on the line described by our speed vector
     float pdist = up.Distance2(p);
 
     // Square of the distance between us and that point
     float mypdist = myp.Distance2(p);
-    cerr << "pdist " << pdist <<endl;
     // If the distance between u and this line is less than the sum of the radii, there might be a collision
     if (pdist < sr) {
      // Our speed on the line
@@ -175,7 +169,6 @@ Collision* Unit::CheckCollision(Unit& u){
         float backdist = sqrt(sr - pdist);
         p.x = p.x - backdist * (relativeVx / length);
         p.y = p.y - backdist * (relativeVy / length);
-        cerr << "p x" << p.x << " y " << p.y << " mypidst " << mypdist << " myp dist " << myp.Distance2(p) <<endl;
         // If the point is now further away it means we are not going the right way, therefore the collision won't happen
         if (myp.Distance2(p) > mypdist) {
             return nullptr;
@@ -183,7 +176,6 @@ Collision* Unit::CheckCollision(Unit& u){
 
         pdist = p.Distance(myp);
 
-        cerr << "pdist " << pdist << " lenght " << length <<endl;
         // The point of impact is further than what we can travel in one turn
         if (pdist > length) {
             return nullptr;
@@ -271,8 +263,6 @@ void Pod::Boost(int thrust){
     // Trigonometry
     vx += cos(ra) * thrust;
     vy += sin(ra) * thrust;
-
-    cerr << "Pod: " << id << " vx " << vx << " vy " << vy << endl;
 }
 
 void Pod::Move(float t){
@@ -386,6 +376,8 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
     float t = 0.0;
 
     int podsLenght =NUM_PODS_PER_PLAYER * NUM_PLAYERS;
+    //Collisions per t
+    vector<Collision*> lastLoopCollisions;
     while (t < 1.0) {
         Collision* firstCollision = nullptr;
 
@@ -395,6 +387,20 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
             for (int j = i + 1; j < podsLenght; ++j) {
                 Collision* col = pods[i]->CheckCollision(*pods[j]);
 
+                for(int k = 0; k < lastLoopCollisions.size(); ++k){
+                    Collision* lastLoopCollision = lastLoopCollisions[k];
+                    if(lastLoopCollision && col){
+                        Checkpoint* checkpointCheck = dynamic_cast<Checkpoint*>(&lastLoopCollision->b);
+                        //If the collision is the same than last loop, we skip it
+                        //We need to check if its checkpint as ID are from 0-checkpoints and 0-Pods, so can't rely on that
+                        if(!checkpointCheck && &lastLoopCollision->a == &col->a && &lastLoopCollision->b == &col->b){
+                            free(col);
+                            col = nullptr;
+                            continue;
+                        }
+                    }
+                }
+
                 if(col != nullptr){
                     cerr << "col t" << col->t << " a " << col->a.id << " b " << col->b.id << endl;
                 }
@@ -403,6 +409,9 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
                 if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
                     free(firstCollision);
                     firstCollision = col;
+                }else{
+                    free(col);
+                    col = nullptr;
                 }
             }
 
@@ -419,6 +428,9 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
             if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
                 free(firstCollision);
                 firstCollision = col;
+            }else{
+                free(col);
+                col = nullptr;
             }
         }
 
@@ -441,10 +453,23 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
 
             t += firstCollision->t;
 
-            free(firstCollision);
-            firstCollision = nullptr;
+            //If we are moving to a new t we can clean current loop collisions
+            if(!lastLoopCollisions.empty() && firstCollision->t != lastLoopCollisions[0]->t){
+                for(int i = 0; i < lastLoopCollisions.size(); ++i){
+                    free(lastLoopCollisions[i]);
+                }
+                lastLoopCollisions.clear();
+            }
+
+            lastLoopCollisions.push_back(firstCollision);
         }
     }
+
+    //Clear before finish
+    for(int i = 0; i < lastLoopCollisions.size(); ++i){
+        free(lastLoopCollisions[i]);
+    }
+    lastLoopCollisions.clear();
 
     for (int i = 0; i < podsLenght; ++i) {
         pods[i]->EndTurnCalculations();
