@@ -132,11 +132,13 @@ Collision* Unit::CheckCollision(Unit& u){
     // Square of the distance
     float dist = Distance2(u);
 
+    cerr << "Unit col check " << id << " over Unit " << u.id <<endl;
+
     // Sum of the radii squared
     float sr = (r + u.r)*(r + u.r);
 
     // We take everything squared to avoid calling sqrt uselessly. It is better for performances
-
+    cerr << " sr " << sr << " dist " << dist << endl;
     if (dist < sr) {
         // Objects are already touching each other. We have an immediate collision.
         return new Collision(*this, u, 0.0);
@@ -144,36 +146,36 @@ Collision* Unit::CheckCollision(Unit& u){
 
     // Optimisation. Objects with the same speed will never collide
     if (vx == u.vx && vy == u.vy) {
-         return nullptr;
+        return nullptr;
     }
 
     // We place ourselves in the reference frame of u. u is therefore stationary and is at (0,0)
-    float x = x - u.x;
-    float y = y - u.y;
-    Point myp = Point(x, y);
-    float vx = vx - u.vx;
-    float vy = vy - u.vy;
+    float relativeX = x - u.x;
+    float relativeY = y - u.y;
+    Point myp = Point(relativeY, relativeX);
+    float relativeVx = vx - u.vx;
+    float relativeVy = vy - u.vy;
     Point up = Point(0, 0);
-
+    cerr << "relative x" << relativeX << " y " << relativeY << " vx " << relativeVx << " vy " << relativeVy <<endl; 
     // We look for the closest point to u (which is in (0,0)) on the line described by our speed vector
-    Point p = up.Closest(myp, Point(x + vx, y + vy));
-
+    Point p = up.Closest(myp, Point(relativeX + relativeVx, relativeY + relativeVy));
+    cerr << "closest p x " << p.x << " y " << p.y <<endl;
     // Square of the distance between u and the closest point to u on the line described by our speed vector
     float pdist = up.Distance2(p);
 
     // Square of the distance between us and that point
     float mypdist = myp.Distance2(p);
-
+    cerr << "pdist " << pdist <<endl;
     // If the distance between u and this line is less than the sum of the radii, there might be a collision
     if (pdist < sr) {
-    // Our speed on the line
-        float length = sqrt(vx*vx + vy*vy);
+     // Our speed on the line
+        float length = sqrt(relativeVx*relativeVx + relativeVy*relativeVy);
 
         // We move along the line to find the point of impact
         float backdist = sqrt(sr - pdist);
-        p.x = p.x - backdist * (vx / length);
-        p.y = p.y - backdist * (vy / length);
-
+        p.x = p.x - backdist * (relativeVx / length);
+        p.y = p.y - backdist * (relativeVy / length);
+        cerr << "p x" << p.x << " y " << p.y << " mypidst " << mypdist << " myp dist " << myp.Distance2(p) <<endl;
         // If the point is now further away it means we are not going the right way, therefore the collision won't happen
         if (myp.Distance2(p) > mypdist) {
             return nullptr;
@@ -181,6 +183,7 @@ Collision* Unit::CheckCollision(Unit& u){
 
         pdist = p.Distance(myp);
 
+        cerr << "pdist " << pdist << " lenght " << length <<endl;
         // The point of impact is further than what we can travel in one turn
         if (pdist > length) {
             return nullptr;
@@ -392,6 +395,10 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
             for (int j = i + 1; j < podsLenght; ++j) {
                 Collision* col = pods[i]->CheckCollision(*pods[j]);
 
+                if(col != nullptr){
+                    cerr << "col t" << col->t << " a " << col->a.id << " b " << col->b.id << endl;
+                }
+
                 // If the collision occurs earlier than the one we currently have we keep it
                 if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
                     free(firstCollision);
@@ -403,6 +410,10 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
             // It is unnecessary to check all checkpoints here. We only test the pod's next checkpoint.
             // We could look for the collisions of the pod with all the checkpoints, but if such a collision happens it wouldn't impact the game in any way
             Collision* col = pods[i]->CheckCollision(*checkpoints[pods[i]->nextCheckpointId]);
+
+            if(col != nullptr){
+                cerr << "col t" << col->t << " a " << col->a.id << " b " << col->b.id << endl;
+            }
 
             // If the collision happens earlier than the current one we keep it
             if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
