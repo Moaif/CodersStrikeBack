@@ -8,6 +8,13 @@ using namespace std;
 
 #define PI 3.14159265
 
+const int CHECKPOINT_RADIUS = 600;
+const int POD_RADIUS = 400;
+const int NUM_PODS_PER_PLAYER =2;
+const int NUM_PLAYERS = 2;
+
+const int MAX_MOVES_SIM = 5;
+
 class Point{
     public:
     float x;
@@ -31,14 +38,12 @@ class Unit: public Point{
     virtual void Bounce(Unit& u);
 };
 
-const int CHECKPOINT_RADIUS = 600;
 class Checkpoint: public Unit{
     public:
     Checkpoint(float x, float y,int id);
     virtual void Bounce(Unit& u)override;
 };
 
-const int POD_RADIUS = 400;
 class Pod: public Unit{
     public:    
     float angle;
@@ -80,7 +85,7 @@ class Move{
     void Mutate(float amplitude);
 };
 
-const int MAX_MOVES_SIM = 5;
+
 class Solution{
     public:
     Move* moves1[MAX_MOVES_SIM];
@@ -193,11 +198,11 @@ Collision* Unit::CheckCollision(Unit& u){
 //Will be overriden on children
 void Unit::Bounce(Unit& u){}
 
-Checkpoint::Checkpoint(float x, float y, int id): Unit(x,y,CHECKPOINT_RADIUS,id,0,0){}
+Checkpoint::Checkpoint(float x, float y, int id): Unit(x,y,id,CHECKPOINT_RADIUS,0,0){}
 
 void Checkpoint::Bounce(Unit& u){}
 
-Pod::Pod(int id):Unit(0,0,POD_RADIUS,id,0,0){}
+Pod::Pod(int id):Unit(0,0,id,POD_RADIUS,0,0),angle(0.0f),nextCheckpointId(0),timeout(100),turnsSinceLastShield(4){}
 
 float Pod::GetAngle(const Point& p)const{
     float d = Distance(p);
@@ -263,6 +268,8 @@ void Pod::Boost(int thrust){
     // Trigonometry
     vx += cos(ra) * thrust;
     vy += sin(ra) * thrust;
+
+    cerr << "Pod: " << id << " vx " << vx << " vy " << vy << endl;
 }
 
 void Pod::Move(float t){
@@ -276,6 +283,7 @@ void Pod::EndTurnCalculations(){
     vx = static_cast<int>(vx * 0.85);//Truncate
     vy = static_cast<int>(vy * 0.85);//Truncate
 
+    //This can be a problem if the program would be infinite, but as it only works for a small number of turns, it would never get overflowed
     ++turnsSinceLastShield;
 
     // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
@@ -341,6 +349,7 @@ void Pod::BounceWithCheckpoint(Checkpoint &c){
     //Handle pod data over next checkpoint
     ++nextCheckpointId;
     ++checkpointsElapsed;
+    timeout = 100;
 }
 
 void Pod::Output(const class Move& move) const{
@@ -369,11 +378,11 @@ void Solution::Mutate(float amplitude){
 
 }
 
-void Play(Pod* pods[], Checkpoint* checkpoints[]) {
+void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
     // This tracks the time during the turn. The goal is to reach 1.0
     float t = 0.0;
 
-    int podsLenght =sizeof(pods)/sizeof(pods[0]);
+    int podsLenght =NUM_PODS_PER_PLAYER * NUM_PLAYERS;
     while (t < 1.0) {
         Collision* firstCollision = nullptr;
 
@@ -431,9 +440,9 @@ void Play(Pod* pods[], Checkpoint* checkpoints[]) {
     }
 }
 
-void Test(Pod* pods[], Checkpoint* checkpoints[]) {
+void Test(Pod*const pods[], Checkpoint* checkpoints[]) {
 
-    int podsLenght =sizeof(pods)/sizeof(pods[0]);
+    int podsLenght =NUM_PODS_PER_PLAYER * NUM_PLAYERS;    
 
     for (int i = 0; i < podsLenght; ++i) {
         pods[i]->Rotate(Point(8000, 4500));
@@ -450,7 +459,7 @@ void Test(Pod* pods[], Checkpoint* checkpoints[]) {
  **/
 int main()
 {
-    const int NUM_PODS =2;
+
 
     int laps;
     cin >> laps; cin.ignore();
@@ -466,8 +475,8 @@ int main()
         checkpoints[i] = new Checkpoint(checkpointX, checkpointY,i);
     }
 
-    Pod* pods[NUM_PODS];
-    for(int i = 0; i < NUM_PODS*2; ++i){//We init ours and enemy ones
+    Pod* pods[NUM_PODS_PER_PLAYER*NUM_PLAYERS];
+    for(int i = 0; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; ++i){//We init ours and enemy ones
         pods[i] = new Pod(i);
     }
 
@@ -475,7 +484,7 @@ int main()
     // game loop
     while (1) {
 
-        for (int i = 0; i < NUM_PODS; i++) {
+        for (int i = 0; i < NUM_PODS_PER_PLAYER; i++) {
             int x; // x position of your pod
             int y; // y position of your pod
             int vx; // x speed of your pod
@@ -489,7 +498,7 @@ int main()
             cerr << "Real: x " << x << " y " << y << " vx " << vx << " vy " << vy << endl;
         }
 
-        for (int i = NUM_PODS; i < NUM_PODS*2; i++) {
+        for (int i = NUM_PODS_PER_PLAYER; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; i++) {
             int x2; // x position of the opponent's pod
             int y2; // y position of the opponent's pod
             int vx2; // x speed of the opponent's pod
@@ -504,14 +513,14 @@ int main()
             cerr << "Real: x " << x2 << " y " << y2 << " vx " << vx2 << " vy " << vy2 << endl;
         }
 
-        test = false;
+        //test = false;
 
         Test(pods,checkpoints);
         
         //Display simulated ones
-        for(int i = 0; i < NUM_PODS*2; ++i){
+        for(int i = 0; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; ++i){
             Pod* currentPod = pods[i];
-            cerr << "Simulation: x " << currentPod->x << " y " << currentPod->y << " vx " << currentPod->vx << " vy " << currentPod->vy << endl;
+            cerr << "Simulation: id " << currentPod->id << " x " << currentPod->x << " y " << currentPod->y << " vx " << currentPod->vx << " vy " << currentPod->vy << endl;
         }
 
         // You have to output the target position
