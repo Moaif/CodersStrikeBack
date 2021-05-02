@@ -24,7 +24,6 @@ class Point{
     Point(float x, float y);
     float Distance2(const Point& p)const;
     float Distance(const Point& p)const;
-    Point Closest(const Point& a, const Point& b)const;
 };
 
 class Unit: public Point{
@@ -104,27 +103,6 @@ float Point::Distance2(const Point& p)const{
 float Point::Distance(const Point& p)const{
     return sqrt(Distance2(p));
 }
-
-Point Point::Closest(const Point& a, const Point& b)const{
-    float da = b.y - a.y;
-    float db = a.x - b.x;
-    float c1 = da*a.x + db*a.y;
-    float c2 = -db*x + da*y;
-    float det = da*da + db*db;
-    float cx = 0;
-    float cy = 0;
-
-    if (det != 0) {
-        cx = (da*c1 - db*c2) / det;
-        cy = (da*c2 + db*c1) / det;
-    } else {
-        // The point is already on the line
-        cx = x;
-        cy = y;
-    }
-
-    return Point(cx, cy);
-} 
 
 Unit::Unit(float x, float y,int id, float r, float vx, float vy):Point(x, y), id(id), r(r), vx(vx), vy(vy){}
 
@@ -462,4 +440,18 @@ int main()
         cout << "8000 "<< "4500" << " 100" << endl;
         cout << "8000 "<< "4500" << " 100" << endl;
     }
+
+    //free resources
+    for(int i= 0; i < checkpointCount; ++i){
+        free(checkpoints[i]);
+        checkpoints[i] = nullptr;
+    }
+    free(checkpoints);
+
+    for(int i = 0; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; ++i){
+        free(pods[i]);
+        pods[i] = nullptr;
+    }
+    free(pods);
+
 }
