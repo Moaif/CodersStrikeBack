@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include "cmath"
+#include "memory"
 
 using namespace std;
 
@@ -10,11 +11,21 @@ using namespace std;
 
 const int CHECKPOINT_RADIUS = 600;
 const int POD_RADIUS = 400;
+const int BOOST_THRUST = 650;
 const int NUM_PODS_PER_PLAYER =2;
 const int NUM_PLAYERS = 2;
 const float SIMULATION_TICK_INTERVAL = 0.01f;
+const int RESPONSE_TIME = 70;
 
 const int MAX_MOVES_SIM = 5;
+const int MAX_POPULATION = 50;
+const float MAX_ROTATION =18;
+const int MAX_THRUST = 100;
+const int SHIELD_PROB = 15;
+const int BOOST_PROB = 20;
+
+const int SCORE_PER_CHECKPOINT = 25000;
+const float RUNNER_HUNTER_WEIGHT = 1.5f;
 
 class Point{
     public:
@@ -44,6 +55,12 @@ class Checkpoint: public Unit{
     virtual void Bounce(Unit& u)override;
 };
 
+class BoostManager{
+    public:
+    bool boostUsed = false;
+    bool simBoostUsed = false;
+};
+
 class Pod: public Unit{
     public:    
     float angle;
@@ -51,18 +68,23 @@ class Pod: public Unit{
     int checkpointsElapsed;
     int timeout;
     int turnsSinceLastShield;
+    shared_ptr<BoostManager> boostManager;
 
-    Pod(int id);
+    Pod(int id, shared_ptr<BoostManager> boostManager);    
+    Pod(const Pod& pod);
+    Pod& operator =(const Pod& pod);
     float GetAngle(const Point& p)const;
     float DiffAngle(const Point& p)const;
     void Rotate(const Point& p);
+    void Rotate(float a);
     void Boost(int thrust);
     void Move(float t);
     void EndTurnCalculations();
     void Play(const Point& p, int thrust);
     virtual void Bounce(Unit& u) override;
     void BounceWithCheckpoint(Checkpoint& c);
-    void Output(const class Move& move) const;
+    void SimulateMove(const class Move& move);
+    void Output(const class Move& move);
 
     void UpdateValues(float x, float y, float vx, float vy, float angle, int nextCheckPointId);
 };
@@ -80,7 +102,9 @@ class Move{
     float angle;
     int thrust;
 
+    Move();
     Move(float angle, int thrust);
+    void CloneFrom(const Move& toClone);
     void Mutate(float amplitude);
 };
 
@@ -89,8 +113,14 @@ class Solution{
     public:
     Move* moves1[MAX_MOVES_SIM];
     Move* moves2[MAX_MOVES_SIM];
+    float Score;
 
+    Solution();
+    ~Solution();
+    void CloneFrom(const Solution& toClone);
     void Mutate(float amplitude);
+    void ConsumeTurn();
+    float ScoreSolution(Pod* pods[], Checkpoint* checkpoints[]);
 };
 
 
@@ -129,7 +159,27 @@ Checkpoint::Checkpoint(float x, float y, int id): Unit(x,y,id,CHECKPOINT_RADIUS,
 
 void Checkpoint::Bounce(Unit& u){}
 
-Pod::Pod(int id):Unit(0,0,id,POD_RADIUS,0,0),angle(0.0f),nextCheckpointId(0),timeout(100),turnsSinceLastShield(4){}
+Pod::Pod(int id, shared_ptr<BoostManager> boostManager):Unit(0,0,id,POD_RADIUS,0,0),angle(0.0f),nextCheckpointId(0),timeout(100),turnsSinceLastShield(4),boostManager(boostManager){}
+
+Pod::Pod(const Pod& pod):Unit(pod.x,pod.y,pod.id,pod.r,pod.vx,pod.vy),
+angle(pod.angle),nextCheckpointId(pod.nextCheckpointId),timeout(pod.timeout),
+turnsSinceLastShield(pod.turnsSinceLastShield),boostManager(pod.boostManager) {}
+
+Pod& Pod::operator =(const Pod& pod){
+    x = pod.x;
+    y = pod.y;
+    id = pod.id;
+    r = pod.r;
+    vx = pod.vx;
+    vy = pod.vy;
+    angle = pod.angle;
+    nextCheckpointId = pod.nextCheckpointId;
+    timeout = pod.timeout;
+    turnsSinceLastShield = pod.turnsSinceLastShield;
+    boostManager = pod.boostManager;
+
+    return *this;
+}
 
 float Pod::GetAngle(const Point& p)const{
     float d = Distance(p);
@@ -165,8 +215,11 @@ float Pod::DiffAngle(const Point& p)const{
 
 void Pod::Rotate(const Point& p){
     float a = DiffAngle(p);
+    Rotate(a);
+}
 
-    // Can't turn by more than 18° in one turn
+void Pod::Rotate(float a){
+    // Can't turn by more than 18° in one turn  
     if (a > 18.0) {
         a = 18.0;
     } else if (a < -18.0) {
@@ -282,8 +335,54 @@ void Pod::BounceWithCheckpoint(Checkpoint &c){
     timeout = 100;
 }
 
-void Pod::Output(const class Move& move) const{
+void Pod::SimulateMove(const class Move& move){
+    Rotate(move.angle);
 
+    int thrust = 0;
+    switch(move.thrust){
+        case -1:
+            turnsSinceLastShield = 0;
+            break;
+        case MAX_THRUST+1:
+            if(boostManager->simBoostUsed){
+                thrust = MAX_THRUST;
+            }else{
+                thrust = BOOST_THRUST;
+                boostManager->simBoostUsed = true;
+            }
+            break;
+        default:
+        thrust = move.thrust;
+            break;
+    }
+    Boost(thrust);
+}
+
+void Pod::Output(const class Move& move){
+    float a = angle + move.angle;
+
+    if (a >= 360.0) {
+        a = a - 360.0;
+    } else if (a < 0.0) {
+        a += 360.0;
+    }
+
+    // Look for a point corresponding to the angle we want
+    // Multiply by 10000.0 to limit rounding errors
+    a = a * PI / 180.0;
+    float px = x + cos(a) * 10000.0;
+    float py = y + sin(a) * 10000.0;
+
+    if (move.thrust == -1) {
+        cout << round(px) << " " << round(py) << " SHIELD" << endl;
+        turnsSinceLastShield = 0;
+    }else if(move.thrust == MAX_THRUST +1){
+        cout << round(px) << " " << round(py) << " BOOST" << endl;
+        boostManager->boostUsed = true;
+    } 
+    else {
+        cout << round(px) << " " << round(py) << " " << move.thrust << endl;        
+    }
 }
 
 void Pod::UpdateValues(float x, float y, float vx, float vy, float angle, int nextCheckPointId){
@@ -293,19 +392,137 @@ void Pod::UpdateValues(float x, float y, float vx, float vy, float angle, int ne
     this->vy = vy;
     this->angle = angle;
     this->nextCheckpointId = nextCheckPointId;
+    boostManager->simBoostUsed = boostManager->boostUsed;
 }
 
 
 Collision::Collision(Unit& a, Unit& b): a(a), b(b){}
 
+Move::Move():angle(0.0f),thrust(0){
+    Mutate(1.0f);
+}
+
 Move::Move(float angle, int thrust): angle(angle), thrust(thrust){}
-    
+
+void Move::CloneFrom(const Move& toClone){
+    angle = toClone.angle;
+    thrust = toClone.thrust;
+}
+
+//I know rand is not the best, but will be using it at first, if i have enought time i'll try to set in place a random generator
+float RandomRange(float min, float max){
+    return min - rand() % static_cast<int>(max-min +1);
+}
+
 void Move::Mutate(float amplitude){
-        
+    float angleMod = RandomRange(-MAX_ROTATION*amplitude,MAX_ROTATION*amplitude);
+    angle = clamp(angle + angleMod, -MAX_ROTATION, MAX_ROTATION);
+
+    if(RandomRange(0, 100) < SHIELD_PROB){
+        thrust = -1;
+    }else if(RandomRange(0, 100) < BOOST_PROB){//In case of boost already used, it will be a max accel, so no need to further handle it
+        thrust = MAX_THRUST+1;
+    }else{
+        int thrustMod = RandomRange(0, MAX_THRUST*amplitude);
+        thrust = clamp(thrust + thrustMod, 0, MAX_THRUST);
+    }
+}
+
+Solution::Solution(): Score(0.0f){
+    for(int i = 0; i < MAX_MOVES_SIM; ++i){
+        moves1[i] = new Move();
+        moves2[i] = new Move();
+    }
+}
+
+//This wouldn't be needed if we use unique_ptr, but as im not sure of its performance, i decided to avoid them
+Solution::~Solution(){
+    for(int i = 0; i < MAX_MOVES_SIM; ++i){
+        free(moves1[i]);
+        free(moves2[i]);
+    }
+
+    free(moves1);
+    free(moves2);
+}
+
+void Solution::CloneFrom(const Solution& toClone){
+    for(int i = 0; i < MAX_MOVES_SIM; ++i){
+        moves1[i]->CloneFrom(*toClone.moves1[i]);
+        moves2[i]->CloneFrom(*toClone.moves2[i]);
+    }
 }
 
 void Solution::Mutate(float amplitude){
+    for(int i = 0; i < MAX_MOVES_SIM ;++i){
+        moves1[i]->Mutate(amplitude);
+        moves2[i]->Mutate(amplitude);
+    }
+}
 
+void Solution::ConsumeTurn(){
+    //Not sure whats more efficient, if clone/copy values, or shift their places
+    for(int i = 0; i < MAX_MOVES_SIM-1; ++i){
+        moves1[i]->CloneFrom(*moves1[i+1]);
+        moves2[i]->CloneFrom(*moves2[i+1]);
+    }
+
+    //Randomize last move to get a new one
+    moves1[MAX_MOVES_SIM-1]->Mutate(1.0f);
+    moves2[MAX_MOVES_SIM-1]->Mutate(1.0f);
+}
+
+float Solution::ScoreSolution(Pod* pods[], Checkpoint* checkpoints[]){
+    //Identify runner-hunter
+    Pod* runners[NUM_PLAYERS];
+    Pod* hunters[NUM_PLAYERS];
+    for(int i = 0; i < NUM_PLAYERS; ++i){
+        Pod* runner = pods[i*NUM_PODS_PER_PLAYER];
+        for(int j= i*NUM_PODS_PER_PLAYER+1; j < NUM_PODS_PER_PLAYER; ++j){
+            //If the new one has more checkpoints, he is the runner
+            if(pods[j]->checkpointsElapsed > runner->checkpointsElapsed){
+                hunters[i] = runner;
+                runner = pods[j];
+            }else if(pods[j]->checkpointsElapsed == runner->checkpointsElapsed){//If they have the same number, then it compares the distance to the next checkpoint
+                if(pods[j]->Distance2(*checkpoints[pods[j]->nextCheckpointId]) < runner->Distance2(*checkpoints[runner->nextCheckpointId])){
+                    hunters[i] = runner;
+                    runner = pods[j];
+                }
+            }else{
+                hunters[i] = pods[j];
+            }
+        }
+        runners[i] = runner;
+    }
+
+    //Copy pods to avoid modyfing the real ones
+    Pod* copyPods[NUM_PODS_PER_PLAYER * NUM_PLAYERS];
+    for(int i = 0; i < NUM_PODS_PER_PLAYER * NUM_PLAYERS; ++i){
+        copyPods[i] = new Pod(*pods[i]);
+    }
+
+    //Simulate end point of the solution
+    for(int i = 0; i < MAX_MOVES_SIM; ++i){
+        //Pod setup based on solution
+        copyPods[0]->SimulateMove(*moves1[i]);
+        copyPods[1]->SimulateMove(*moves2[i]);
+        //For enemies we have no moves, so they will just move to next checkpoint at max speed(can be upgraded by finding them a solution)
+        copyPods[2]->Rotate(*checkpoints[copyPods[2]->nextCheckpointId]);
+        copyPods[2]->Boost(100);
+        copyPods[3]->Rotate(*checkpoints[copyPods[3]->nextCheckpointId]);
+        copyPods[3]->Boost(100);
+    }
+
+    //Compute score
+    float ourRunnerScore = runners[0]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[0]->Distance(*checkpoints[runners[0]->nextCheckpointId]);
+    float enemyRunnerScore =runners[1]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[1]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
+    float runnerScore = ourRunnerScore-enemyRunnerScore;
+
+    float hunterScore = -hunters[0]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
+
+    Score = runnerScore * RUNNER_HUNTER_WEIGHT + hunterScore;
+        
+    return Score;
 }
 
 void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
@@ -363,6 +580,60 @@ void Test(Pod*const pods[], Checkpoint* checkpoints[]) {
     Play(pods, checkpoints);
 }
 
+bool CompareSolutionsByScore(Solution* a, Solution* b){
+    return a->Score < b->Score;
+}
+
+Solution* ComputeSolution(Pod* pods[], Checkpoint* checkpoints[], Solution* lastTurnSolution){
+    //Init population
+    int populationLenght = MAX_POPULATION + (lastTurnSolution? 1:0);
+    Solution* population[populationLenght];
+
+    for(int i = 0; i < MAX_POPULATION; ++i){
+        population[i] = new Solution();
+    }
+
+    //Insert last solution into the pool with an offset on its moves as first one has already been used
+    if(lastTurnSolution){
+        lastTurnSolution->ConsumeTurn();
+        population[populationLenght-1] = lastTurnSolution;
+    }
+
+    clock_t clokInitialT = clock();
+    float t = 0;
+    //Compute simulations for the allowed time
+    while(t < RESPONSE_TIME){
+        //Evaluate solutions
+        for(int i = 0; i < populationLenght; ++i){
+            population[i]->ScoreSolution(pods, checkpoints);
+        }
+        //Sort by score
+        sort(population, population+populationLenght, CompareSolutionsByScore);
+        //Override last 50% with the best values
+        int index = 0;
+        for(int i = static_cast<int>(populationLenght*0.5f); i < populationLenght; ++i, ++index){
+            population[i]->CloneFrom(*population[index]);
+            //And mutate them(bigger changes at first, smaller with the time)
+            population[i]->Mutate(1-t/RESPONSE_TIME);
+        }
+        //Update timer
+        t = clock() - clokInitialT;
+    }
+
+    //Sort Solutions by score
+    sort(population, population+populationLenght, CompareSolutionsByScore);
+
+    Solution* ret = population[0];
+    //Free resources
+    for(int i = 1; i < populationLenght; ++i){        
+        free(population[i]);
+    }
+    free(population);
+
+    //Return best one
+    return ret;
+}
+
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -387,11 +658,14 @@ int main()
     }
 
     Pod* pods[NUM_PODS_PER_PLAYER*NUM_PLAYERS];
-    for(int i = 0; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; ++i){//We init ours and enemy ones
-        pods[i] = new Pod(i);
+    for(int i = 0; i < NUM_PLAYERS; ++i){//We init ours and enemy ones
+        shared_ptr<BoostManager> boostManager = make_shared<BoostManager>();
+        for(int j = 0; j < NUM_PODS_PER_PLAYER; ++j){
+            pods[i] = new Pod(i,boostManager);
+        }
     }
 
-    bool test = true;
+    Solution* lastTurnSolution = nullptr;
     // game loop
     while (1) {
 
@@ -403,10 +677,8 @@ int main()
             int angle; // angle of your pod
             int nextCheckPointId; // next check point id of your pod
             cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; cin.ignore();
-            if(test){
+
             pods[i]->UpdateValues(x,y, vx, vy, angle, nextCheckPointId);
-            }
-            cerr << "Real: x " << x << " y " << y << " vx " << vx << " vy " << vy << endl;
         }
 
         for (int i = NUM_PODS_PER_PLAYER; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; i++) {
@@ -418,30 +690,19 @@ int main()
             int nextCheckPointId2; // next check point id of the opponent's pod
             cin >> x2 >> y2 >> vx2 >> vy2 >> angle2 >> nextCheckPointId2; cin.ignore();
 
-            if(test){
             pods[i]->UpdateValues(x2, y2, vx2, vy2, angle2,  nextCheckPointId2);
-            }
-            cerr << "Real: x " << x2 << " y " << y2 << " vx " << vx2 << " vy " << vy2 << endl;
         }
 
-        //test = false;
 
-        Test(pods,checkpoints);
-        
-        //Display simulated ones
-        for(int i = 0; i < NUM_PODS_PER_PLAYER*NUM_PLAYERS; ++i){
-            Pod* currentPod = pods[i];
-            cerr << "Simulation: id " << currentPod->id << " x " << currentPod->x << " y " << currentPod->y << " vx " << currentPod->vx << " vy " << currentPod->vy << endl;
-        }
+        lastTurnSolution = ComputeSolution(pods, checkpoints, lastTurnSolution);
 
-        // You have to output the target position
-        // followed by the power (0 <= thrust <= 100)
-        // i.e.: "x y thrust"
-        cout << "8000 "<< "4500" << " 100" << endl;
-        cout << "8000 "<< "4500" << " 100" << endl;
+        pods[0]->Output(*lastTurnSolution->moves1[0]);
+        pods[1]->Output(*lastTurnSolution->moves2[0]);
     }
 
-    //free resources
+    //free resources    
+    free(lastTurnSolution);
+
     for(int i= 0; i < checkpointCount; ++i){
         free(checkpoints[i]);
         checkpoints[i] = nullptr;
