@@ -14,10 +14,10 @@ const int POD_RADIUS = 400;
 const int BOOST_THRUST = 650;
 const int NUM_PODS_PER_PLAYER =2;
 const int NUM_PLAYERS = 2;
-const float SIMULATION_TICK_INTERVAL = 0.01f;
+const float SIMULATION_TICK_INTERVAL = 0.1f;
 const int RESPONSE_TIME = 70;
 
-const int MAX_MOVES_SIM = 3;
+const int MAX_MOVES_SIM = 1;
 const int MAX_POPULATION = 100;
 const float MAX_PERCENTAJE_BEST_SCORE_TO_KEEP = 0.3f;
 const float MAX_ROTATION =18;
@@ -26,7 +26,7 @@ const int SHIELD_PROB = 10;
 const int BOOST_PROB = 10;
 
 const int SCORE_PER_CHECKPOINT = 30000;
-const float RUNNER_HUNTER_WEIGHT = 1.5f;
+const float RUNNER_HUNTER_WEIGHT = 5.0f;
 
 //Definitions
 //-----------------------------------------------------------------
@@ -132,9 +132,13 @@ class Solution{
 void Play(Pod*const pods[], Checkpoint* checkpoints[]);
 void Test(Pod*const pods[], Checkpoint* checkpoints[]);
 void Test(Pod*const pods[], Checkpoint* checkpoints[],const Solution& solution);
-float RandomRange(float min, float max);
 bool CompareSolutionsByScore(Solution* a, Solution* b);
+float RandomRange(float min, float max);
+float ComputeScore(Pod*const pods[], Checkpoint* checkpoints[]);
+double GetTimeSinceTurnStarted();
 
+//Variable to manage time over all the program
+static clock_t TurnStartClock = 0;
 
 //Declarations
 //-----------------------------------------------------------------
@@ -163,6 +167,7 @@ Collision* Unit::CheckCollision(Unit& u){
         return new Collision(*this, u);
     }
 
+
     return nullptr;
 }
 
@@ -176,10 +181,10 @@ void Checkpoint::Bounce(Unit& u){}
 BoostManager::BoostManager():boostUsed(false){};
 BoostManager::BoostManager(bool boostUsed):boostUsed(boostUsed){}
 
-Pod::Pod(int id, shared_ptr<BoostManager> boostManager):Unit(0,0,id,POD_RADIUS,0,0),angle(0.0f),nextCheckpointId(0),timeout(100),turnsSinceLastShield(4),boostManager(boostManager){}
+Pod::Pod(int id, shared_ptr<BoostManager> boostManager):Unit(0,0,id,POD_RADIUS,0,0),angle(0.0f),nextCheckpointId(1), checkpointsElapsed(0),timeout(100),turnsSinceLastShield(4),boostManager(boostManager){}
 
 Pod::Pod(const Pod& pod, shared_ptr<BoostManager> boostManager):Unit(pod.x,pod.y,pod.id,pod.r,pod.vx,pod.vy),
-angle(pod.angle),nextCheckpointId(pod.nextCheckpointId),timeout(pod.timeout),
+angle(pod.angle),nextCheckpointId(pod.nextCheckpointId), checkpointsElapsed(pod.checkpointsElapsed),timeout(pod.timeout),
 turnsSinceLastShield(pod.turnsSinceLastShield),boostManager(boostManager) {}
 
 Pod& Pod::operator =(const Pod& pod){
@@ -191,6 +196,7 @@ Pod& Pod::operator =(const Pod& pod){
     vy = pod.vy;
     angle = pod.angle;
     nextCheckpointId = pod.nextCheckpointId;
+    checkpointsElapsed = pod.checkpointsElapsed;
     timeout = pod.timeout;
     turnsSinceLastShield = pod.turnsSinceLastShield;
     boostManager = pod.boostManager;
@@ -346,6 +352,7 @@ void Pod::BounceWithCheckpoint(Checkpoint &c){
     if(nextCheckpointId != c.id){
         return;
     }
+
     //Handle pod data over next checkpoint
     ++nextCheckpointId;
     ++checkpointsElapsed;
@@ -408,6 +415,9 @@ void Pod::UpdateValues(float x, float y, float vx, float vy, float angle, int ne
     this->vx = vx;
     this->vy = vy;
     this->angle = angle;
+    if( this->nextCheckpointId != nextCheckPointId){
+        ++this->checkpointsElapsed;
+    }
     this->nextCheckpointId = nextCheckPointId;
 }
 
@@ -493,30 +503,6 @@ float Solution::ScoreSolution(Pod* pods[], Checkpoint* checkpoints[]){
         }
     }
 
-    //Identify runner-hunter
-    Pod* runners[NUM_PLAYERS];
-    Pod* hunters[NUM_PLAYERS];
-    for(int i = 0; i < NUM_PLAYERS; ++i){
-        Pod* runner = copyPods[i*NUM_PODS_PER_PLAYER];
-        for(int j= i*NUM_PODS_PER_PLAYER+1; j < NUM_PODS_PER_PLAYER; ++j){
-            //If the new one has more checkpoints, he is the runner
-            if(copyPods[j]->checkpointsElapsed > runner->checkpointsElapsed){
-                hunters[i] = runner;                
-                runner = copyPods[j];
-                continue;
-            }else if(copyPods[j]->checkpointsElapsed == runner->checkpointsElapsed){//If they have the same number, then it compares the distance to the next checkpoint
-                if(copyPods[j]->Distance2(*checkpoints[copyPods[j]->nextCheckpointId]) < runner->Distance2(*checkpoints[runner->nextCheckpointId])){
-                    hunters[i] = runner;
-                    runner = copyPods[j];
-                    continue;
-                }
-            }
-            //If its not a runner, it goes to hunters
-            hunters[i] = copyPods[j];            
-        }
-        runners[i] = runner;
-    }
-
     //Simulate end point of the solution
     for(int i = 0; i < MAX_MOVES_SIM; ++i){
         //Pod setup based on solution
@@ -531,21 +517,13 @@ float Solution::ScoreSolution(Pod* pods[], Checkpoint* checkpoints[]){
         Play(copyPods, checkpoints);
     }
 
-    //Compute score
-    float ourRunnerScore = runners[0]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[0]->Distance(*checkpoints[runners[0]->nextCheckpointId]);
-    float enemyRunnerScore =runners[1]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[1]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
-    float runnerScore = ourRunnerScore-enemyRunnerScore;
-    //cerr << "our r " << ourRunnerScore << " enemy r " << enemyRunnerScore << " total r" << runnerScore << endl;
-    float hunterScore = -runners[1]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
-    //cerr << " hunter " << hunterScore <<endl;
-    Score = runnerScore * RUNNER_HUNTER_WEIGHT + hunterScore;    
-    //cerr << "Total " << Score <<endl;
+    Score = ComputeScore(copyPods, checkpoints);
 
     //Free copy pods
     for(int i = 0; i < NUM_PODS_PER_PLAYER* NUM_PLAYERS; ++i){
         free(copyPods[i]);
-    }       
-        
+    }
+
     return Score;
 }
 
@@ -556,7 +534,6 @@ Solution* ComputeSolution(Pod* pods[], Checkpoint* checkpoints[], Solution* last
 
     for(int i = 0; i < MAX_POPULATION; ++i){
         population[i] = new Solution();
-        //cerr << population[i]->moves1[0]->thrust << " " << population[i]->moves1[0]->angle << " " << population[i]->moves2[0]->thrust<< " " <<population[i]->moves2[0]->angle << endl;
     }
 
     //Insert last solution into the pool with an offset on its moves as first one has already been used
@@ -564,24 +541,18 @@ Solution* ComputeSolution(Pod* pods[], Checkpoint* checkpoints[], Solution* last
         lastTurnSolution->ConsumeTurn();
         population[populationLenght-1] = lastTurnSolution;
     }
-
-    clock_t clokInitialT = clock();
-    double t = 0;
+    
+    double t = GetTimeSinceTurnStarted();
     //Compute simulations for the allowed time
     while(t < RESPONSE_TIME){
-
         //Evaluate solutions
         for(int i = 0; i < populationLenght; ++i){
-            cerr << "Score "<< population[i]->ScoreSolution(pods, checkpoints) << endl;
-            //population[i]->ScoreSolution(pods, checkpoints);
+            population[i]->ScoreSolution(pods, checkpoints);
         }
-
+        
         //Sort by score
         sort(population, population+populationLenght, CompareSolutionsByScore);                
-
-        for(int i = 0; i < populationLenght; ++i){
-            cerr << "ordered "<< population[i]->Score << endl;;
-        }
+        
         //Override last 50% with the best values
         int index = 0;
         int elementsToDuplicate = static_cast<int>(populationLenght*MAX_PERCENTAJE_BEST_SCORE_TO_KEEP);
@@ -597,17 +568,16 @@ Solution* ComputeSolution(Pod* pods[], Checkpoint* checkpoints[], Solution* last
             }
 
         }
-
+        
         //Update timer
-        t = (clock() - clokInitialT)/((double)CLOCKS_PER_SEC / 1000);
-    }
-
+        t = GetTimeSinceTurnStarted();
+    }    
     //Sort Solutions by score
     sort(population, population+populationLenght, CompareSolutionsByScore);
 
     Solution* ret = population[0];
     //Free resources
-    for(int i = 1; i < populationLenght; ++i){        
+    for(int i = 1; i < populationLenght; ++i){     
         free(population[i]);
     }
     
@@ -625,17 +595,14 @@ void Play(Pod*const pods[], Checkpoint* checkpoints[]) {
 
         //Check pod collisions
         for(int i = 0; i < podsLenght; ++i){
-
             //With desired checkpoint
             Collision* col = pods[i]->CheckCollision(*checkpoints[pods[i]->nextCheckpointId]);
-            
             if(col){
                 col->a.Bounce(col->b);
 
                 free(col);
                 col = nullptr;
             }
-
 
             //With other pods
             for(int j = i+1; j < podsLenght; ++j){
@@ -705,6 +672,48 @@ float RandomRange(float min, float max){
     return min + rand() % static_cast<int>(max-min +1);
 }
 
+float ComputeScore(Pod*const pods[], Checkpoint* checkpoints[]){
+    //Identify runner-hunter
+    Pod* runners[NUM_PLAYERS];
+    Pod* hunters[NUM_PLAYERS];
+    for(int i = 0; i < NUM_PLAYERS; ++i){
+        Pod* runner = pods[i*NUM_PODS_PER_PLAYER];
+        for(int j= i*NUM_PODS_PER_PLAYER+1; j < NUM_PODS_PER_PLAYER; ++j){
+            //If the new one has more checkpoints, he is the runner
+            if(pods[j]->checkpointsElapsed > runner->checkpointsElapsed){
+                hunters[i] = runner;                
+                runner = pods[j];
+                continue;
+            }else if(pods[j]->checkpointsElapsed == runner->checkpointsElapsed){//If they have the same number, then it compares the distance to the next checkpoint
+                if(pods[j]->Distance2(*checkpoints[pods[j]->nextCheckpointId]) < runner->Distance2(*checkpoints[runner->nextCheckpointId])){
+                    hunters[i] = runner;
+                    runner = pods[j];
+                    continue;
+                }
+            }
+            //If its not a runner, it goes to hunters
+            hunters[i] = pods[j];            
+        }
+        runners[i] = runner;
+    }
+
+    //Compute score
+    float ourRunnerScore = runners[0]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[0]->Distance(*checkpoints[runners[0]->nextCheckpointId]);
+    float enemyRunnerScore =runners[1]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[1]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
+    float runnerScore = ourRunnerScore-enemyRunnerScore;    
+    //cerr << "our r " << ourRunnerScore << " enemy r " << enemyRunnerScore << " total r" << runnerScore << endl;
+    float hunterScore = -hunters[0]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
+    //cerr << " hunter id " << hunterScore <<endl;
+    float Score = runnerScore * RUNNER_HUNTER_WEIGHT + hunterScore;    
+    //cerr << "Total " << Score <<endl;
+
+    return Score;
+}
+
+double GetTimeSinceTurnStarted(){
+    return (clock() - TurnStartClock)/((double)CLOCKS_PER_SEC / 1000);
+}
+
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -712,7 +721,10 @@ float RandomRange(float min, float max){
  **/
 int main()
 {
-
+    //Init rand seed
+    uint seed = time(NULL);
+    srand(seed);
+    cerr << "Seed " << seed << endl;
 
     int laps;
     cin >> laps; cin.ignore();
@@ -739,7 +751,7 @@ int main()
     Solution* lastTurnSolution = nullptr;
     // game loop
     while (1) {
-
+        TurnStartClock = clock();
         for (int i = 0; i < NUM_PODS_PER_PLAYER; i++) {
             int x; // x position of your pod
             int y; // y position of your pod
@@ -764,9 +776,9 @@ int main()
             pods[i]->UpdateValues(x2, y2, vx2, vy2, angle2,  nextCheckPointId2);
         }
 
-        lastTurnSolution = ComputeSolution(pods, checkpoints, lastTurnSolution);
+        cerr << "Real Score " << ComputeScore(pods, checkpoints) << endl;
 
-        Test(pods, checkpoints, *lastTurnSolution);
+        lastTurnSolution = ComputeSolution(pods, checkpoints, lastTurnSolution);
 
         pods[0]->Output(*lastTurnSolution->moves1[0]);
         pods[1]->Output(*lastTurnSolution->moves2[0]);
