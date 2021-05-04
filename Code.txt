@@ -656,6 +656,8 @@ void Test(Pod*const pods[], Checkpoint* checkpoints[],const Solution& solution) 
 
     Play(copyPods, checkpoints);
 
+    cerr << "Simulation Score " << ComputeScore(copyPods, checkpoints) << endl;
+
     //Free copy pods
     for(int i = 0; i < NUM_PODS_PER_PLAYER* NUM_PLAYERS; ++i){
         cerr << "Simulation id " << copyPods[i]->id << " x " << copyPods[i]->x << " y " << copyPods[i]->y << " vx " << copyPods[i]->vx << " vy " << copyPods[i]->vy << " nextCh " << copyPods[i]->nextCheckpointId << endl;
@@ -678,7 +680,7 @@ float ComputeScore(Pod*const pods[], Checkpoint* checkpoints[]){
     Pod* hunters[NUM_PLAYERS];
     for(int i = 0; i < NUM_PLAYERS; ++i){
         Pod* runner = pods[i*NUM_PODS_PER_PLAYER];
-        for(int j= i*NUM_PODS_PER_PLAYER+1; j < NUM_PODS_PER_PLAYER; ++j){
+        for(int j= i*NUM_PODS_PER_PLAYER+1; j < (i+1)*NUM_PODS_PER_PLAYER; ++j){
             //If the new one has more checkpoints, he is the runner
             if(pods[j]->checkpointsElapsed > runner->checkpointsElapsed){
                 hunters[i] = runner;                
@@ -779,6 +781,8 @@ int main()
         cerr << "Real Score " << ComputeScore(pods, checkpoints) << endl;
 
         lastTurnSolution = ComputeSolution(pods, checkpoints, lastTurnSolution);
+
+        Test(pods, checkpoints, *lastTurnSolution);
 
         pods[0]->Output(*lastTurnSolution->moves1[0]);
         pods[1]->Output(*lastTurnSolution->moves2[0]);
