@@ -9,15 +9,15 @@ using namespace std;
 
 #define PI 3.14159265
 
-const int CHECKPOINT_RADIUS = 600;
+const int CHECKPOINT_RADIUS = 400;
 const int POD_RADIUS = 400;
 const int BOOST_THRUST = 650;
 const int NUM_PODS_PER_PLAYER =2;
 const int NUM_PLAYERS = 2;
-const float SIMULATION_TICK_INTERVAL = 0.05f;
+const float SIMULATION_TICK_INTERVAL = 0.01f;
 const int RESPONSE_TIME = 70;
 
-const int MAX_MOVES_SIM = 1;
+const int MAX_MOVES_SIM = 4;
 const int MAX_POPULATION = 200;
 const float MAX_PERCENTAJE_BEST_SCORE_TO_KEEP = 0.25f;
 const float MUTATION_AMPLITUDE_MULTIPLIER = 3.0f;
@@ -27,8 +27,8 @@ const int SHIELD_PROB = 0;
 const int BOOST_PROB = 10;
 
 const int SCORE_PER_CHECKPOINT = 50000;
-const float HUNTER_ANGLE_SCORE_FACTOR = 20;
-const float RUNNER_HUNTER_WEIGHT = 5.0f;
+const float HUNTER_ANGLE_SCORE_FACTOR = 10;
+const float RUNNER_HUNTER_WEIGHT = 2.0f;
 
 //Definitions
 //-----------------------------------------------------------------
@@ -425,8 +425,6 @@ void Pod::UpdateValues(float x, float y, float vx, float vy, float angle, int ne
     }
     this->nextCheckpointId = nextCheckPointId;
     ++turnsSinceLastShield;
-
-    cerr << "UPDATE shieldT" << turnsSinceLastShield << endl;
 }
 
 
@@ -773,14 +771,13 @@ float ComputeScore(Pod*const pods[], Checkpoint* checkpoints[]){
 
     //Compute score
     float ourRunnerScore = runners[0]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[0]->Distance(*checkpoints[runners[0]->nextCheckpointId]);
+    float ourRunnerScore2 = hunters[0]->checkpointsElapsed * SCORE_PER_CHECKPOINT - hunters[0]->Distance(*checkpoints[hunters[0]->nextCheckpointId]);
     float enemyRunnerScore =runners[1]->checkpointsElapsed * SCORE_PER_CHECKPOINT - runners[1]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
-    float runnerScore = ourRunnerScore-enemyRunnerScore;    
-    //cerr << "our r " << ourRunnerScore << " enemy r " << enemyRunnerScore << " total r" << runnerScore << endl;
-    float hunterScore = -hunters[0]->Distance(*checkpoints[runners[1]->nextCheckpointId]);
-    hunterScore -= hunters[0]->DiffAngle(*runners[1]) * HUNTER_ANGLE_SCORE_FACTOR;
-    //cerr << " hunter id " << hunterScore <<endl;
-    float Score = runnerScore * RUNNER_HUNTER_WEIGHT + hunterScore;    
-    //cerr << "Total " << Score <<endl;
+    float runnerScore = (ourRunnerScore-enemyRunnerScore) * RUNNER_HUNTER_WEIGHT + (ourRunnerScore2-enemyRunnerScore);
+
+    //float hunterScore = -hunters[0]->Distance(*runners[1]);
+    //hunterScore -= hunters[0]->DiffAngle(*runners[1]) * HUNTER_ANGLE_SCORE_FACTOR;
+    float Score = runnerScore;    
 
     return Score;
 }
@@ -835,7 +832,7 @@ int main()
             int angle; // angle of your pod
             int nextCheckPointId; // next check point id of your pod
             cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; cin.ignore();
-            cerr << "real id " << i << " x " << x << " y " << y << " vx " << vx << " vy " << vy << " nextCh " << nextCheckPointId << endl;
+            
             pods[i]->UpdateValues(x,y, vx, vy, angle, nextCheckPointId);
         }
 
@@ -847,15 +844,11 @@ int main()
             int angle2; // angle of the opponent's pod
             int nextCheckPointId2; // next check point id of the opponent's pod
             cin >> x2 >> y2 >> vx2 >> vy2 >> angle2 >> nextCheckPointId2; cin.ignore();
-            cerr << "real id " << i << " x " << x2 << " y " << y2 << " vx " << vx2 << " vy " << vy2 << " nextCh " << nextCheckPointId2 << endl;
+            
             pods[i]->UpdateValues(x2, y2, vx2, vy2, angle2,  nextCheckPointId2);
         }
 
-        cerr << "Real Score " << ComputeScore(pods, checkpoints) << endl;
-
         lastTurnSolution = ComputeSolution(pods, checkpoints, lastTurnSolution);
-
-        Test(pods, checkpoints, *lastTurnSolution);
 
         pods[0]->Output(*lastTurnSolution->moves1[0]);
         pods[1]->Output(*lastTurnSolution->moves2[0]);
